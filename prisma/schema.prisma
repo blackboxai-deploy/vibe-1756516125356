@@ -1,0 +1,669 @@
+// RunFuture Economy Database Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// TENANT & MULTI-TENANCY MODELS
+// ============================================================================
+
+model Tenant {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  displayName   String
+  description   String?
+  logo          String?
+  favicon       String?
+  domain        String?
+  subdomain     String   @unique
+  status        TenantStatus @default(ACTIVE)
+  plan          TenantPlan   @default(STARTER)
+  trialEndsAt   DateTime?
+  settings      Json     @default("{}")
+  billing       Json     @default("{}")
+  limits        Json     @default("{}")
+  features      Json     @default("{}")
+  customization Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  users         User[]
+  tenantUsers   TenantUser[]
+  invitations   TenantInvitation[]
+  products      Product[]
+  orders        Order[]
+  vendors       Vendor[]
+  aiProjects    AIProject[]
+  
+  @@map("tenants")
+}
+
+enum TenantStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  TRIAL
+  EXPIRED
+}
+
+enum TenantPlan {
+  STARTER
+  BUSINESS
+  ENTERPRISE
+  CUSTOM
+}
+
+// ============================================================================
+// USER MANAGEMENT MODELS
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  firstName     String
+  lastName      String
+  avatar        String?
+  phone         String?
+  dateOfBirth   DateTime?
+  gender        Gender?
+  password      String?
+  role          UserRole  @default(CUSTOMER)
+  tenantId      String?
+  preferences   Json      @default("{}")
+  metadata      Json      @default("{}")
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  tenant        Tenant?         @relation(fields: [tenantId], references: [id])
+  tenantUsers   TenantUser[]
+  sessions      Session[]
+  activityLogs  ActivityLog[]
+  orders        Order[]
+  cartItems     CartItem[]
+  reviews       Review[]
+  
+  // NextAuth
+  accounts      Account[]
+
+  @@map("users")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  TENANT_ADMIN
+  VENDOR_MANAGER
+  VENDOR_STAFF
+  CUSTOMER_SERVICE
+  ANALYTICS_VIEWER
+  CUSTOMER
+}
+
+model TenantUser {
+  id           String   @id @default(cuid())
+  tenantId     String
+  userId       String
+  role         String
+  permissions  Json     @default("[]")
+  invitedBy    String?
+  joinedAt     DateTime @default(now())
+  lastActiveAt DateTime?
+  status       TenantUserStatus @default(ACTIVE)
+
+  // Relations
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId])
+  @@map("tenant_users")
+}
+
+enum TenantUserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+model TenantInvitation {
+  id         String   @id @default(cuid())
+  tenantId   String
+  email      String
+  role       String
+  invitedBy  String
+  token      String   @unique
+  status     InvitationStatus @default(PENDING)
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@map("tenant_invitations")
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+// ============================================================================
+// AUTHENTICATION MODELS
+// ============================================================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  ipAddress    String?
+  userAgent    String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  resource   String
+  resourceId String?
+  details    Json     @default("{}")
+  ipAddress  String
+  userAgent  String
+  tenantId   String?
+  timestamp  DateTime @default(now())
+
+  // Relations
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
+
+// ============================================================================
+// MARKETPLACE MODELS
+// ============================================================================
+
+model Vendor {
+  id               String        @id @default(cuid())
+  name             String
+  description      String
+  logo             String?
+  banner           String?
+  email            String        @unique
+  phone            String
+  website          String?
+  tenantId         String
+  businessInfo     Json          @default("{}")
+  bankDetails      Json          @default("{}")
+  settings         Json          @default("{}")
+  verification     Json          @default("{}")
+  metrics          Json          @default("{}")
+  status           VendorStatus  @default(ACTIVE)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // Relations
+  tenant           Tenant        @relation(fields: [tenantId], references: [id])
+  products         Product[]
+
+  @@map("vendors")
+}
+
+enum VendorStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model Category {
+  id           String        @id @default(cuid())
+  name         String
+  slug         String        @unique
+  description  String?
+  image        String?
+  parentId     String?
+  sortOrder    Int           @default(0)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relations
+  parent       Category?     @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children     Category[]    @relation("CategoryHierarchy")
+  products     Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id            String        @id @default(cuid())
+  name          String
+  slug          String        @unique
+  description   String
+  shortDesc     String?
+  price         Float
+  salePrice     Float?
+  currency      Currency      @default(THB)
+  images        Json          @default("[]")
+  categoryId    String
+  tags          Json          @default("[]")
+  specifications Json         @default("{}")
+  inventory     Json          @default("{}")
+  seo           Json          @default("{}")
+  ratings       Json          @default("{}")
+  vendorId      String
+  tenantId      String
+  status        ProductStatus @default(ACTIVE)
+  featured      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  category      Category      @relation(fields: [categoryId], references: [id])
+  vendor        Vendor        @relation(fields: [vendorId], references: [id])
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  orderItems    OrderItem[]
+  cartItems     CartItem[]
+  reviews       Review[]
+
+  @@map("products")
+}
+
+enum Currency {
+  THB
+  USD
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  OUT_OF_STOCK
+  DISCONTINUED
+}
+
+model Order {
+  id              String        @id @default(cuid())
+  orderNumber     String        @unique
+  customerId      String
+  tenantId        String
+  subtotal        Float
+  tax             Float
+  shipping        Float
+  discount        Float         @default(0)
+  total           Float
+  currency        Currency      @default(THB)
+  status          OrderStatus   @default(PENDING)
+  paymentStatus   PaymentStatus @default(PENDING)
+  paymentMethod   String
+  paymentDetails  Json          @default("{}")
+  shippingAddress Json
+  billingAddress  Json
+  shippingMethod  String
+  trackingNumber  String?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  customer        User          @relation(fields: [customerId], references: [id])
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  items           OrderItem[]
+  payments        Payment[]
+
+  @@map("orders")
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model OrderItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  productId     String
+  productName   String
+  productImage  String
+  quantity      Int
+  price         Float
+  total         Float
+  specifications Json    @default("{}")
+
+  // Relations
+  order         Order    @relation(fields: [orderId], references: [id])
+  product       Product  @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model CartItem {
+  id          String   @id @default(cuid())
+  userId      String
+  productId   String
+  quantity    Int
+  price       Float
+  sessionId   String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id])
+
+  @@map("cart_items")
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  orderId         String
+  amount          Float
+  currency        Currency      @default(THB)
+  method          String
+  status          PaymentStatus @default(PENDING)
+  gatewayId       String?
+  gatewayResponse Json          @default("{}")
+  failureReason   String?
+  processedAt     DateTime?
+  refundedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  order           Order         @relation(fields: [orderId], references: [id])
+
+  @@map("payments")
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  productId   String
+  userId      String
+  rating      Int      @db.SmallInt
+  title       String?
+  comment     String
+  images      Json     @default("[]")
+  verified    Boolean  @default(false)
+  helpful     Int      @default(0)
+  status      ReviewStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  product     Product  @relation(fields: [productId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("reviews")
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ============================================================================
+// AI FACTORY MODELS
+// ============================================================================
+
+model AIAgent {
+  id           String      @id @default(cuid())
+  name         String
+  type         AgentType
+  status       AgentStatus @default(IDLE)
+  capabilities Json        @default("[]")
+  currentTask  String?
+  lastActive   DateTime    @default(now())
+  performance  Json        @default("{}")
+  settings     Json        @default("{}")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Relations
+  tasks        AITask[]
+  projects     AIProject[]
+
+  @@map("ai_agents")
+}
+
+enum AgentType {
+  FRONTEND
+  BACKEND
+  DATABASE
+  API
+  TESTING
+  SECURITY
+  PERFORMANCE
+  DOCUMENTATION
+  DEPLOYMENT
+  MONITORING
+}
+
+enum AgentStatus {
+  IDLE
+  WORKING
+  COMPLETED
+  ERROR
+  OFFLINE
+}
+
+model AIProject {
+  id                String        @id @default(cuid())
+  name              String
+  description       String
+  requirements      Json          @default("[]")
+  tenantId          String
+  status            ProjectStatus @default(PLANNING)
+  assignedAgents    Json          @default("[]")
+  progress          Float         @default(0)
+  estimatedCompletion DateTime?
+  techStack         Json          @default("{}")
+  codebase          Json          @default("[]")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  tenant            Tenant        @relation(fields: [tenantId], references: [id])
+  tasks             AITask[]
+  agents            AIAgent[]
+
+  @@map("ai_projects")
+}
+
+enum ProjectStatus {
+  PLANNING
+  DEVELOPMENT
+  TESTING
+  DEPLOYMENT
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model AITask {
+  id            String      @id @default(cuid())
+  projectId     String
+  agentId       String
+  type          TaskType
+  title         String
+  description   String
+  requirements  Json        @default("{}")
+  context       Json        @default("{}")
+  priority      TaskPriority @default(MEDIUM)
+  status        TaskStatus   @default(PENDING)
+  result        Json         @default("{}")
+  executionTime Int?
+  errorMessage  String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  completedAt   DateTime?
+
+  // Relations
+  project       AIProject    @relation(fields: [projectId], references: [id])
+  agent         AIAgent      @relation(fields: [agentId], references: [id])
+
+  @@map("ai_tasks")
+}
+
+enum TaskType {
+  CODE_GENERATION
+  ANALYSIS
+  TESTING
+  DEPLOYMENT
+  OPTIMIZATION
+  DOCUMENTATION
+  REVIEW
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model CodeFile {
+  id           String   @id @default(cuid())
+  projectId    String
+  path         String
+  content      String   @db.Text
+  language     String
+  generatedBy  String
+  quality      Json     @default("{}")
+  lastModified DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@map("code_files")
+}
+
+// ============================================================================
+// SYSTEM & ANALYTICS MODELS
+// ============================================================================
+
+model SystemMetrics {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  metricType  String
+  name        String
+  value       Float
+  unit        String?
+  metadata    Json     @default("{}")
+  timestamp   DateTime @default(now())
+
+  @@map("system_metrics")
+}
+
+model APIUsage {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  endpoint    String
+  method      String
+  statusCode  Int
+  responseTime Int
+  ipAddress   String?
+  userAgent   String?
+  userId      String?
+  timestamp   DateTime @default(now())
+
+  @@map("api_usage")
+}
+
+// ============================================================================
+// NOTIFICATION MODELS
+// ============================================================================
+
+model Notification {
+  id          String             @id @default(cuid())
+  userId      String
+  tenantId    String?
+  type        NotificationType
+  title       String
+  message     String
+  data        Json               @default("{}")
+  channels    Json               @default("[]")
+  status      NotificationStatus @default(PENDING)
+  sentAt      DateTime?
+  readAt      DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  ORDER
+  PAYMENT
+  SYSTEM
+  MARKETING
+  SECURITY
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  READ
+}
